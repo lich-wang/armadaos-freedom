@@ -53,12 +53,13 @@ ArmadaOS Freedom 是基于 [ArmadaOS](https://github.com/armada-os/armada)、由
 
 ## 设备支持
 
-目前适配联想拯救者 Y700 四代与五代，两代共用 Linux **7.2.6** 内核，并分别维护设备树和硬件配置。
+目前适配联想拯救者 Y700 四代与五代，两代共用 Linux **7.2.6** 内核，并分别维护设备树和硬件配置。同一内核和 kShimC 启动器也支持联想小新 Pad Pro GT（TB710FU，SM8650）；它的硬件功能是在 SteamOS 用户空间下验证的，尚未用 ArmadaOS 镜像验证。
 
 | 设备 | 型号 / SoC | 设备文档 | 已知问题 |
 |---|---|---|---|
 | 联想拯救者 Y700 四代 | TB322FC / SM8750 | [四代设备文档](devices/lenovo-tb322fc/README.md) | [四代已知问题](devices/lenovo-tb322fc/README.md#已知问题与待完成项) |
 | 联想拯救者 Y700 五代 | TB323FU / SM8850P | [五代设备文档](devices/lenovo-tb323fu/README.md) | [五代已知问题](devices/lenovo-tb323fu/README.md#已知限制) |
+| 联想小新 Pad Pro GT | TB710FU / SM8650 | [TB710FU 设备文档](devices/lenovo-tb710fu/README.md) | [TB710FU 已知问题](devices/lenovo-tb710fu/README.md#已知问题与待完成项) |
 
 两代的启动镜像仍需匹配各自设备，不能直接互刷。
 
