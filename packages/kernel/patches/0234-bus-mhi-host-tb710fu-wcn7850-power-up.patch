@@ -1,0 +1,219 @@
+From: "lich.wang" <lich.wang@gmail.com>
+Date: Fri, 23 Oct 2026 06:07:21 +0000
+Subject: [PATCH] bus: mhi: host: TB710FU WCN7850 power-up workarounds
+
+On TB710FU the WCN7850 resets its PCIe link during the PBL->SBL handover
+and the MSIs MHI waits for during power up do not arrive:
+
+- retry the READY wait after the handover instead of giving up;
+- after the BHI download drop a stale DISABLE queued by the link-down
+  and continue with BHIe once the device reports SBL;
+- poll BHI_EXECENV for mission mode and keep a thread servicing the
+  event rings, so the M0 change and the QMI/QRTR traffic are seen.
+
+Only on lenovo,tb710fu.
+
+From MeteoricmeteorLL/tb710fu-linux.
+---
+ drivers/bus/mhi/host/boot.c |  20 ++++++
+ drivers/bus/mhi/host/pm.c   | 118 +++++++++++++++++++++++++++++++++---
+ 2 files changed, 131 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/bus/mhi/host/boot.c b/drivers/bus/mhi/host/boot.c
+index 19c84913c..011a4bf61 100644
+--- a/drivers/bus/mhi/host/boot.c
++++ b/drivers/bus/mhi/host/boot.c
+@@ -13,6 +13,7 @@
+ #include <linux/list.h>
+ #include <linux/mhi.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/random.h>
+ #include <linux/slab.h>
+ #include <linux/wait.h>
+@@ -592,6 +593,25 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
+ fw_load_ready_state:
+ 	/* Transitioning into MHI RESET->READY state */
+ 	ret = mhi_ready_state_transition(mhi_cntrl);
++	/*
++	 * TB710FU: the WCN7850 resets its PCIe link during the PBL->SBL
++	 * handover and comes back in SBL, with READY set only after the
++	 * default wait.  Restore the PM state and wait again.
++	 */
++	if (ret && of_machine_is_compatible("lenovo,tb710fu")) {
++		int retry;
++
++		for (retry = 0; retry < 4 && ret; retry++) {
++			msleep(3000);
++			dev_info(dev, "device lost during PBL->SBL handover, retrying READY wait (%d/4)\n",
++				 retry + 1);
++			write_lock_irq(&mhi_cntrl->pm_lock);
++			mhi_cntrl->pm_state = MHI_PM_POR;
++			mhi_cntrl->dev_state = MHI_STATE_RESET;
++			write_unlock_irq(&mhi_cntrl->pm_lock);
++			ret = mhi_ready_state_transition(mhi_cntrl);
++		}
++	}
+ 	if (ret) {
+ 		dev_err(dev, "MHI did not enter READY state\n");
+ 		goto error_ready_state;
+diff --git a/drivers/bus/mhi/host/pm.c b/drivers/bus/mhi/host/pm.c
+index f799503c8..73a9c60f7 100644
+--- a/drivers/bus/mhi/host/pm.c
++++ b/drivers/bus/mhi/host/pm.c
+@@ -9,9 +9,11 @@
+ #include <linux/dma-direction.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/interrupt.h>
++#include <linux/kthread.h>
+ #include <linux/list.h>
+ #include <linux/mhi.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/slab.h>
+ #include <linux/wait.h>
+ #include "internal.h"
+@@ -795,6 +797,37 @@ void mhi_pm_sys_err_handler(struct mhi_controller *mhi_cntrl)
+ }
+ 
+ /* Device State Transition worker */
++/*
++ * TB710FU: after a successful BHI download the WCN7850 resets its PCIe link,
++ * and the link-down may already have queued a DISABLE that tears the whole
++ * power-up down although the firmware is running in SBL.  Drop such stale
++ * DISABLE transitions and continue with BHIe once the device reports SBL.
++ */
++static void mhi_tb710fu_after_bhi(struct mhi_controller *mhi_cntrl,
++				  struct list_head *head)
++{
++	struct state_transition *itr, *tmp;
++	enum mhi_ee_type ee = MHI_EE_MAX;
++	int i;
++
++	for (i = 0; i < 10; i++) {
++		msleep(2000);
++		list_for_each_entry_safe(itr, tmp, head, node) {
++			if (itr->state == DEV_ST_TRANSITION_DISABLE) {
++				list_del(&itr->node);
++				kfree(itr);
++				dev_info(&mhi_cntrl->mhi_dev->dev,
++					 "dropped stale DISABLE transition\n");
++			}
++		}
++		ee = mhi_get_exec_env(mhi_cntrl);
++		if (ee == MHI_EE_SBL || MHI_IN_MISSION_MODE(ee))
++			break;
++	}
++	if (ee == MHI_EE_SBL)
++		mhi_queue_state_transition(mhi_cntrl, DEV_ST_TRANSITION_SBL);
++}
++
+ void mhi_pm_st_worker(struct work_struct *work)
+ {
+ 	struct state_transition *itr, *tmp;
+@@ -819,6 +852,8 @@ void mhi_pm_st_worker(struct work_struct *work)
+ 				mhi_cntrl->ee = mhi_get_exec_env(mhi_cntrl);
+ 			write_unlock_irq(&mhi_cntrl->pm_lock);
+ 			mhi_fw_load_handler(mhi_cntrl);
++			if (of_machine_is_compatible("lenovo,tb710fu"))
++				mhi_tb710fu_after_bhi(mhi_cntrl, &head);
+ 			break;
+ 		case DEV_ST_TRANSITION_SBL:
+ 			write_lock_irq(&mhi_cntrl->pm_lock);
+@@ -1274,6 +1309,71 @@ void mhi_power_down_keep_dev(struct mhi_controller *mhi_cntrl,
+ }
+ EXPORT_SYMBOL_GPL(mhi_power_down_keep_dev);
+ 
++/*
++ * TB710FU: the WCN7850 does not deliver the MSIs MHI waits for during power
++ * up.  Poll BHI_EXECENV for mission mode instead, then keep a thread that
++ * services the event rings (the same work as the MSI handler) so that the
++ * M0 state change and the following QMI/QRTR traffic are seen.
++ */
++static struct task_struct *mhi_tb710fu_poll_task;
++
++static int mhi_tb710fu_poll_thread(void *data)
++{
++	struct mhi_controller *mhi_cntrl = data;
++	struct mhi_event *ev;
++	int i;
++
++	while (!kthread_should_stop()) {
++		/* keep going in error states: RDDM/recovery events need it */
++		if (mhi_cntrl->pm_state == MHI_PM_DISABLE || !mhi_cntrl->mhi_ctxt)
++			break;
++
++		ev = mhi_cntrl->mhi_event;
++		for (i = 0; i < mhi_cntrl->total_ev_rings; i++, ev++)
++			mhi_irq_handler(0, ev);
++
++		/* the controller state machine (SYS_ERR/RDDM detection) too */
++		mhi_intvec_threaded_handler(0, mhi_cntrl);
++		msleep(100);
++	}
++
++	mhi_tb710fu_poll_task = NULL;
++	return 0;
++}
++
++static void mhi_tb710fu_wait_mission_mode(struct mhi_controller *mhi_cntrl)
++{
++	int i;
++
++	/* msleep() polling: a long wait_event_timeout() trips hung_task */
++	for (i = 0; i < 1200; i++) {
++		enum mhi_ee_type hw_ee;
++
++		if (MHI_IN_MISSION_MODE(mhi_cntrl->ee))
++			break;
++
++		write_lock_irq(&mhi_cntrl->pm_lock);
++		hw_ee = MHI_REG_ACCESS_VALID(mhi_cntrl->pm_state) ?
++			mhi_get_exec_env(mhi_cntrl) : mhi_cntrl->ee;
++		write_unlock_irq(&mhi_cntrl->pm_lock);
++		mhi_cntrl->ee = hw_ee;
++
++		if (MHI_IN_MISSION_MODE(mhi_cntrl->ee)) {
++			mhi_queue_state_transition(mhi_cntrl,
++						   DEV_ST_TRANSITION_MISSION_MODE);
++			if (!mhi_tb710fu_poll_task) {
++				mhi_tb710fu_poll_task =
++					kthread_run(mhi_tb710fu_poll_thread,
++						    mhi_cntrl, "mhi_evpoll");
++				if (IS_ERR(mhi_tb710fu_poll_task))
++					mhi_tb710fu_poll_task = NULL;
++			}
++			break;
++		}
++		msleep(1000);
++	}
++}
++
+ int mhi_sync_power_up(struct mhi_controller *mhi_cntrl)
+ {
+ 	int ret = mhi_async_power_up(mhi_cntrl);
+@@ -1282,13 +1382,17 @@ int mhi_sync_power_up(struct mhi_controller *mhi_cntrl)
+ 	if (ret)
+ 		return ret;
+ 
+-	/* Some devices need more time to set ready during power up */
+-	timeout_ms = mhi_cntrl->ready_timeout_ms ?
+-		mhi_cntrl->ready_timeout_ms : mhi_cntrl->timeout_ms;
+-	wait_event_timeout(mhi_cntrl->state_event,
+-			   MHI_IN_MISSION_MODE(mhi_cntrl->ee) ||
+-			   MHI_PM_FATAL_ERROR(mhi_cntrl->pm_state),
+-			   msecs_to_jiffies(timeout_ms));
++	if (of_machine_is_compatible("lenovo,tb710fu")) {
++		mhi_tb710fu_wait_mission_mode(mhi_cntrl);
++	} else {
++		/* Some devices need more time to set ready during power up */
++		timeout_ms = mhi_cntrl->ready_timeout_ms ?
++			mhi_cntrl->ready_timeout_ms : mhi_cntrl->timeout_ms;
++		wait_event_timeout(mhi_cntrl->state_event,
++				   MHI_IN_MISSION_MODE(mhi_cntrl->ee) ||
++				   MHI_PM_FATAL_ERROR(mhi_cntrl->pm_state),
++				   msecs_to_jiffies(timeout_ms));
++	}
+ 
+ 	ret = (MHI_IN_MISSION_MODE(mhi_cntrl->ee)) ? 0 : -ETIMEDOUT;
+ 	if (ret)

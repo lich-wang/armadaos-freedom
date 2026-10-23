@@ -1,0 +1,449 @@
+--- a/arch/arm64/boot/dts/qcom/sm8650-lenovo-tb710fu.dts
++++ b/arch/arm64/boot/dts/qcom/sm8650-lenovo-tb710fu.dts
+@@ -1,8 +1,18 @@
++/*
++ * Lenovo Xiaoxin Pad Pro GT (TB710FU), Snapdragon 8 Gen 3 (SM8650).
++ *
++ * Based on the board tree of MeteoricmeteorLL/tb710fu-linux (panel and
++ * touch bring-up by SpendyYT); booted from the kShimC menu in boot_a, which
++ * fills /chosen and the splash framebuffer below.
++ */
++
+ /dts-v1/;
+ 
+ #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+ #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+ #include <dt-bindings/leds/common.h>
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+ #include "sm8650.dtsi"
+ #include "pm8550.dtsi"
+ #include "pm8550b.dtsi"
+@@ -20,8 +30,7 @@
+  * entirely on the PDC, which does not forward anything on this board (INT
+  * pulses confirmed on the pad, irq count stuck at 0).  Falling back to the
+  * classic tlmm summary path (GIC SPI 208) programs the registers and
+- * delivers; nothing in this port uses system suspend, so the PDC wakeup
+- * capability is not missed. */
++ * delivers.  s2idle with the power key as wake source still works. */
+ &tlmm { /delete-property/ wakeup-parent; };
+ 
+ / {
+@@ -39,12 +48,25 @@
+ 	};
+ 
+ 	chosen {
+-		stdout-path = "serial0:115200n8";
+ 		#address-cells = <2>;
+ 		#size-cells = <2>;
+ 		ranges;
++
++		/*
++		 * kShimC fills this template with the scanout ABL left running
++		 * and enables it; it is the console until msm takes over.
++		 */
++		framebuffer0: framebuffer@d5100000 {
++			compatible = "simple-framebuffer";
++			reg = <0x0 0xd5100000 0x0 (3200 * 2000 * 4)>;
++			width = <3200>;
++			height = <2000>;
++			stride = <(3200 * 4)>;
++			format = "a8r8g8b8";
++			status = "disabled";
++		};
+ 	};
+-	
++
+ 	pmic-glink {
+ 		compatible = "qcom,sm8650-pmic-glink",
+ 			     "qcom,sm8550-pmic-glink",
+@@ -153,8 +175,8 @@
+ 		regulator-always-on;
+ 		regulator-boot-on;
+ 	};
+-	
+ 
++
+ 	sy7758_vdd: sy7758-vdd {
+ 		compatible = "regulator-fixed";
+ 		regulator-name = "sy7758_vdd";
+@@ -164,70 +186,47 @@
+ 		regulator-boot-on;
+ 	};
+ 	reserved-memory {
+-		aop_tme_uefi_merged_mem: aop-tme-uefi-merged@81c80000 { 
++		aop_tme_uefi_merged_mem: aop-tme-uefi-merged@81c80000 {
+ 			reg = <0x00 0x81c80000 0x00 0x75000 >;
+ 			no-map;
+ 		};
+-			
++
+ 		lost_reg_mem: lost-reg-mem@9b09c000 {
+ 			no-map;
+ 			reg = <0x00 0x9b09c000 0x00 0x4000>;
+-		};		
+-		
++		};
++
+ 		linux,cma {
+ 			compatible = "shared-dma-pool";
+ 			size = <0x0 0x2000000>;
+ 			reusable;
+ 			linux,cma-default;
+ 		};
+-		
++
+ 		ramoops@ac300000 {
+ 			compatible = "ramoops";
+ 			reg = <0x00 0xac300000 0x00 0x100000>;
+ 			record-size = <0x40000>;
+ 			console-size = <0x40000>;
+ 			pmsg-size = <0x80000>;
+-			/* ram_core.c 里 mem-type 的编号是
+-			 *   0 = WCOMBINE, 1 = NONCACHED, 2 = NORMAL
+-			 * 原来是 2(NORMAL/可缓存)：硬复位不会回写 cache，
+-			 * 所以"面板一上电就硬锁"那几次 pstore 里什么都没有。
+-			 * 改成 0(write-combining / Normal-NC) 让控制台日志直接
+-			 * 落到 DRAM，复位后可在 /sys/fs/pstore 读回。
+-			 * 不用 1(noncached)：arm64 上是 Device-nGnRnE，ramoops 的
+-			 * 非对齐访问会触发 alignment fault。 */
++			/*
++			 * 0 = write-combining: a hard reset does not write back
++			 * the cache, so cached (2) records come back empty;
++			 * noncached (1) is Device memory on arm64 and ramoops'
++			 * unaligned accesses fault there.
++			 */
+ 			mem-type = <0x00>;
+ 			ecc-size = <0x10>;
+-		};		
+-			/* TB710FU: bootloader splash framebuffer.  The kernel's boot
+-		 * console, liveness gauge and initcall bar draw into it at a fixed
+-		 * physical address (0xd5100000); see tb_mark()/tbfb in
+-		 * init/main.c.  U-Boot adds this node itself, but writes its reg
+-		 * byte-swapped (it lands as base 0x10d5 size 0x9001, reserving
+-		 * nothing) and marks it no-map.  Declaring it here wins, because
+-		 * U-Boot only fills in a node that is missing.
+-		 *
+-		 * Reserved, and deliberately NOT no-map: the drawing code reaches
+-		 * it through __va(), which needs the region in the linear map.
+-		 *
+-		 * Without the reservation the page allocator hands these pages out
+-		 * as page cache and the drawing code then overwrites whatever was
+-		 * allocated there -- silent corruption of large files.
++		};
++		/*
++		 * The bootloader splash / kShimC console framebuffer.  Reserved
++		 * (not no-map), or the page allocator hands these pages out while
++		 * the scanout keeps reading them.
+ 		 */
+ 		framebuffer_mem: framebuffer@d5100000 {
+ 			reg = <0x00 0xd5100000 0x00 0x1900000>;
+ 		};
+ 
+-		/* TB710FU: the two rings the boot log black box appends to
+-		 * (tb_bb_pa[] in init/main.c).  Same rule: reserved, not no-map.
+-		 */
+-		blackbox_a_mem: tb-blackbox-a@b0000000 {
+-			reg = <0x00 0xb0000000 0x00 0x100000>;
+-		};
+-
+-		blackbox_b_mem: tb-blackbox-b@d6a00000 {
+-			reg = <0x00 0xd6a00000 0x00 0x100000>;
+-		};
+-
+ };
+ 
+ 	wcn7850-pmu {
+@@ -372,7 +371,7 @@
+ 			regulator-max-microvolt = <2800000>;
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+ 		};
+-		
++
+ 		vreg_l11b_1p2: ldo11 {
+ 			regulator-name = "vreg_l11b_1p2";
+ 			regulator-min-microvolt = <1200000>;
+@@ -476,7 +475,7 @@
+ 
+ 		vreg_s2c_0p8: smps2 {
+ 			regulator-name = "vreg_s2c_0p8";
+-			/* WCN7850 启动需 ≥852mV，pwrseq 驱动只 enable 不调压，故抬 min */
++			/* WCN7850 needs >= 852 mV; pwrseq enables but never sets it */
+ 			regulator-min-microvolt = <852000>;
+ 			regulator-max-microvolt = <1036000>;
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+@@ -589,7 +588,7 @@
+ 
+ 		vreg_s4i_0p85: smps4 {
+ 			regulator-name = "vreg_s4i_0p85";
+-			/* WCN7850 启动需 ≥852mV，pwrseq 驱动只 enable 不调压，故抬 min */
++			/* WCN7850 needs >= 852 mV; pwrseq enables but never sets it */
+ 			regulator-min-microvolt = <852000>;
+ 			regulator-max-microvolt = <1004000>;
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+@@ -611,7 +610,7 @@
+ 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
+ 						   RPMH_REGULATOR_MODE_HPM>;
+ 		};
+-		
++
+ 		vreg_l2i_0p88: ldo2 {
+ 			regulator-name = "vreg_l2i_0p88";
+ 			regulator-min-microvolt = <880000>;
+@@ -675,7 +674,7 @@
+ // Lcd bias and backlight
+ &i2c6 {
+ 	status = "okay";
+-	
++
+ 	// Power
+ 	aw37504: regulator@3e {
+ 		reg = <0x3e>;
+@@ -685,10 +684,11 @@
+ 		pinctrl-names = "default", "sleep";
+ 		status = "okay";
+ 
+-		/* 社区参考用单个 awinic,aw37504 节点、由 reset-gpios 同时控制
+-		 * ENP/ENN；本树只有主线 aw37503 双路输出驱动，所以拆成 outp(VPOS,
+-		 * ENP=tlmm90) / outn(VNEG, ENN=tlmm91) 两路，由面板驱动的
+-		 * avdd-supply/avee-supply 在 prepare 里按 VCC→bias 顺序使能。 */
++		/*
++		 * The panel bias chip is an AW37504; the mainline aw37503 driver
++		 * models it as two outputs, VPOS (ENP = TLMM 90) and VNEG (ENN =
++		 * TLMM 91), enabled by the panel after its VCC rails.
++		 */
+ 		aw37504_avdd: outp {
+ 			regulator-name = "panel-avdd";
+ 			regulator-min-microvolt = <5800000>;
+@@ -721,8 +721,9 @@
+ 	};
+ };
+ 
++/* the video codec is not brought up yet */
+ &iris {
+-	status = "okay";
++	status = "disabled";
+ 
+ 	firmware-name = "qcom/sm8650/xiaoxin/gt/vpu33_4v.mbn";
+ };
+@@ -737,11 +738,9 @@
+ 	qcom,dual-dsi-mode;
+ 	qcom,sync-dual-dsi;
+ 	vdda-supply = <&vreg_l3i_1p2>;
+-	
++
+ 	display_panel: panel@0 {
+ 		status = "okay";
+-		/* 对齐社区参考：面板节点直接引用 bias(avdd/avee) 与背光，
+-		 * 由 panel-nt36532-wqhd-dual-dsi-dsc.c 在 prepare 里统一使能 */
+ 		compatible = "lenovo,nt36532-wqhd";
+ 		reg = <0>;
+ 		pinctrl-names = "default", "sleep";
+@@ -809,13 +808,9 @@
+ 
+ &mdss_dp0 {
+ 	/*
+-	 * 关闭 DP：本板 USB-C DP 链路（88e8000.phy 的 aux bridge）在 DTB 里
+-	 * 不完整，aux_bridge 取不到下游 drm_bridge，DP 控制器永久处于
+-	 * deferred probe（waiting_for_supplier: 88e8000.phy）。而 DP0 接了
+-	 * DPU 的输出端口，会被 add_display_components() 纳入 msm DRM master
+-	 * 的 component 匹配表，导致 master 永远凑不齐 component、card0 不注册
+-	 * （现象：背光亮但黑屏、/sys/class/drm 为空）。点屏阶段不需要外接屏，
+-	 * 先关掉，让 master 仅由 DPU + 双 DSI + GPU 组成。
++	 * The USB-C DP path is not described completely (the aux bridge of
++	 * 88e8000.phy has no downstream bridge), so DP0 would stay deferred
++	 * and keep the msm DRM master from ever binding.
+ 	 */
+ 	status = "disabled";
+ };
+@@ -824,7 +819,7 @@
+ 	status = "okay";
+ 
+ 	touchscreen@0 {
+-		compatible = "novatek,NVT-ts-spi";
++		compatible = "novatek,nt36532-ts-spi";
+ 		reg = <0>;
+ 
+ 		spi-max-frequency = <9600000>;
+@@ -850,6 +845,9 @@
+ 		panel = <&display_panel>;
+ 
+ 		firmware-name = "novatek/novatek_nt36532_fw.bin";
++
++		/* Lenovo Tab Pen Plus through the touch IC, as in the vendor dtbo */
++		novatek,pen-support;
+ 	};
+ };
+ 
+@@ -955,14 +953,14 @@
+ };
+ 
+ &uart15 {
+-	status = "enabled";
++	status = "okay";
+ };
+ 
+ &pon_pwrkey {
+ 	status = "okay";
+ };
+ 
+-&pon_resin { 
++&pon_resin {
+ 	linux,code = <KEY_VOLUMEDOWN>;
+ 
+ 	status = "okay";
+@@ -1053,7 +1051,7 @@
+ 		drive-strength = <2>;
+ 		bias-pull-down;
+ 	};
+-	
++
+ 	disp0_reset_n_active: disp0-reset-n-active-state {
+ 		pins = "gpio133";
+ 		function = "gpio";
+@@ -1150,7 +1148,7 @@
+ 		bias-pull-up;
+ 		input-enable;
+ 		power-source = <1>;
+-	};	
++	};
+ };
+ 
+ &uart14 {
+@@ -1162,7 +1160,8 @@
+ 		/* The board's factory-assigned BT address, read from the
+ 		 * Android system.  The binding is little-endian: the textual
+ 		 * address 24:b5:b9:94:8e:24 is stored last byte first. */
+-		local-bd-address = [24 8e 94 b9 b5 24];
++		/* the unit's own address (little-endian), all zeros = unset */
++		local-bd-address = [00 00 00 00 00 00];
+ 
+ 		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+ 		vddaon-supply = <&vreg_pmu_aon_0p59>;
+@@ -1210,15 +1209,17 @@
+ };
+ 
+ &remoteproc_adsp {
+-	firmware-name = "qcom/sm8650/xiaoxin/gt/adsp.mbn",
+-			"qcom/sm8650/xiaoxin/gt/adsp_dtb.mbn";
++	/* the unit's own split images from /vendor/firmware_mnt/image */
++	firmware-name = "qcom/sm8650/xiaoxin/gt/adsp.mdt",
++			"qcom/sm8650/xiaoxin/gt/adsp_dtb.mdt";
+ 
+ 	status = "okay";
+ };
+ 
+ &remoteproc_cdsp {
+-	firmware-name = "qcom/sm8650/xiaoxin/gt/cdsp.mbn",
+-			"qcom/sm8650/xiaoxin/gt/cdsp_dtb.mbn";
++	/* the unit's own split images from /vendor/firmware_mnt/image */
++	firmware-name = "qcom/sm8650/xiaoxin/gt/cdsp.mdt",
++			"qcom/sm8650/xiaoxin/gt/cdsp_dtb.mdt";
+ 
+ 	status = "okay";
+ };
+@@ -1245,4 +1246,104 @@
+ 
+ &xo_board {
+ 	clock-frequency = <76800000>;
++};
++
++/* Speakers: 4x Awinic AW882xx smart PA on i2c_hub_4, fed by TDM1 (SECONDARY_TDM_RX_0,
++ * 4 slots x 32 bit). */
++&tlmm {
++	tdm1_clk_active: tdm1-clk-active-state {
++		pins = "gpio121"; function = "i2s1_sck"; drive-strength = <8>; bias-disable; output-high;
++	};
++	tdm1_clk_sleep: tdm1-clk-sleep-state {
++		pins = "gpio121"; function = "gpio"; drive-strength = <2>; bias-pull-down; input-enable;
++	};
++	tdm1_ws_active: tdm1-ws-active-state {
++		pins = "gpio123"; function = "i2s1_ws"; drive-strength = <8>; bias-disable; output-high;
++	};
++	tdm1_ws_sleep: tdm1-ws-sleep-state {
++		pins = "gpio123"; function = "gpio"; drive-strength = <2>; bias-pull-down; input-enable;
++	};
++	tdm1_din_active: tdm1-din-active-state {
++		pins = "gpio122"; function = "i2s1_data0"; drive-strength = <8>; bias-disable;
++	};
++	tdm1_din_sleep: tdm1-din-sleep-state {
++		pins = "gpio122"; function = "gpio"; drive-strength = <2>; bias-pull-down; input-enable;
++	};
++	tdm1_dout_active: tdm1-dout-active-state {
++		pins = "gpio124"; function = "i2s1_data1"; drive-strength = <8>; bias-disable;
++	};
++	tdm1_dout_sleep: tdm1-dout-sleep-state {
++		pins = "gpio124"; function = "gpio"; drive-strength = <2>; bias-pull-down; input-enable;
++	};
++};
++
++&i2c_master_hub_0 {
++	status = "okay";
++};
++
++&i2c_hub_4 {
++	status = "okay";
++	#address-cells = <1>;
++	#size-cells = <0>;
++
++	spk_amp0: aw882xx@34 {
++		compatible = "awinic,aw882xx_smartpa"; reg = <0x34>; #sound-dai-cells = <0>;
++		rename-flag = <1>; monitor-mode = "hal_monitor"; aw-cali-mode = "none";
++		aw-re-max = <30000>; aw-re-min = <4000>; sync-load = <1>; sound-channel = <0>;
++		reset-gpios = <&tlmm 9 GPIO_ACTIVE_HIGH>;
++	};
++	spk_amp1: aw882xx@35 {
++		compatible = "awinic,aw882xx_smartpa"; reg = <0x35>; #sound-dai-cells = <0>;
++		rename-flag = <1>; monitor-mode = "hal_monitor"; aw-cali-mode = "none";
++		aw-re-max = <30000>; aw-re-min = <4000>; sync-load = <1>; sound-channel = <1>;
++		reset-gpios = <&tlmm 8 GPIO_ACTIVE_HIGH>;
++	};
++	spk_amp2: aw882xx@36 {
++		compatible = "awinic,aw882xx_smartpa"; reg = <0x36>; #sound-dai-cells = <0>;
++		rename-flag = <1>; monitor-mode = "hal_monitor"; aw-cali-mode = "none";
++		aw-re-max = <30000>; aw-re-min = <4000>; sync-load = <1>; sound-channel = <2>;
++		reset-gpios = <&tlmm 2 GPIO_ACTIVE_HIGH>;
++	};
++	spk_amp3: aw882xx@37 {
++		compatible = "awinic,aw882xx_smartpa"; reg = <0x37>; #sound-dai-cells = <0>;
++		rename-flag = <1>; monitor-mode = "hal_monitor"; aw-cali-mode = "none";
++		aw-re-max = <30000>; aw-re-min = <4000>; sync-load = <1>; sound-channel = <3>;
++		reset-gpios = <&tlmm 60 GPIO_ACTIVE_HIGH>;
++	};
+ };
++
++/ {
++	sound {
++		compatible = "lenovo,tb710fu-sndcard";
++		model = "Lenovo-TB710FU";
++		pinctrl-names = "default", "sleep";
++		pinctrl-0 = <&tdm1_clk_active &tdm1_ws_active &tdm1_din_active &tdm1_dout_active>;
++		pinctrl-1 = <&tdm1_clk_sleep &tdm1_ws_sleep &tdm1_din_sleep &tdm1_dout_sleep>;
++
++		aw-spk-dai-link {
++			link-name = "AW882xx Playback";
++			cpu {
++				sound-dai = <&q6apmbedai SECONDARY_TDM_RX_0>;
++				dai-tdm-slot-num = <8>;
++				dai-tdm-slot-width = <32>;
++				dai-tdm-slot-rx-mask = <1 1 1 1 0 0 0 0>;
++			};
++			codec {
++				sound-dai = <&spk_amp0>, <&spk_amp1>, <&spk_amp2>, <&spk_amp3>;
++			};
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++	};
++};
++
++/* GPU top level as in the vendor DTB: 903 MHz at TURBO, same ACD value as 834 MHz */
++&gpu_opp_table {
++	opp-903000000 {
++		opp-hz = /bits/ 64 <903000000>;
++		opp-level = <RPMH_REGULATOR_LEVEL_TURBO>;
++		opp-peak-kBps = <14398437>;
++		qcom,opp-acd-level = <0x882a5ffd>;
++	};
++};

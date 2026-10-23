@@ -368,6 +368,12 @@ CONFIG_QCOM_SPMI_ADC_TM5_GEN3=y
 CONFIG_TOUCHSCREEN_NT36536_SPI=m           # Lenovo Y700 Gen5 (TB323FU)
 CONFIG_DRM_PANEL_NOVATEK_NT36523=y         # Lenovo Y700 Gen5 (TB323FU) panel
 
+# ============== SM8650 Lenovo Xiaoxin Pad Pro GT (TB710FU) ==============
+# Platform options come from the SM8650 block above.
+CONFIG_DRM_PANEL_NOVATEK_NT36532=y         # 3200x2000 dual-DSI DSC panel
+CONFIG_REGULATOR_AW37503=y                 # panel bias, needed by the built-in panel
+CONFIG_TOUCHSCREEN_NT36532_SPI=m           # touch + Lenovo Tab Pen Plus
+
 # ============== Filesystems ==============
 CONFIG_EXFAT_FS=m
 CONFIG_NLS_UTF8=y

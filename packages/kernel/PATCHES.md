@@ -1110,3 +1110,81 @@ no equivalent submission was found, or a permanent URL to the upstream submissio
   source: armada
   upstream: local
   notes: On lenovo,baldur, preserve a public Bluetooth address already configured through MGMT instead of replacing it during the existing 0501 serial-address setup. Other machines retain the existing serial-derived address behavior. The paired startup helper waits for management readiness and confirms the address by reading it back; a request acknowledgement alone is not treated as success.
+- `dts/sm8650-lenovo-tb710fu.dts`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/sources/arch/arm64/boot/dts/qcom/sm8650-lenovo-tb710fu.dts
+  upstream: unknown
+- `dts/sm8650-lenovo-tb710fu.dts.patch`
+  source: armada
+  notes: Adds the kShimC simple-framebuffer template, the four AW882xx speaker amplifiers with the TDM1 pins and the `lenovo,tb710fu-sndcard` card, the 903 MHz GPU level, the touch IC's pen support and the unit's own ADSP/CDSP firmware paths; drops the port's boot-log reservations and another unit's Bluetooth address, disables iris, and translates the comments.
+- `patches/0224-dt-bindings-backlight-sy7758-add-follower.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/patches/TB710FU-full-tree.diff
+  upstream: local
+  notes: Documents `silergy,follower`, a second SY7758 that mirrors the primary chip's brightness.
+- `patches/0225-backlight-sy7758-tb710fu-follower-chips.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/patches/TB710FU-full-tree.diff
+  upstream: local
+  notes: Follower chips register no backlight device and get every brightness update of the primary; boards with one chip are unchanged. Burst mode is turned off on lenovo,tb710fu only.
+- `patches/0226-drm-panel-add-novatek-nt36532-tb710fu.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/sources/drivers/gpu/drm/panel/panel-nt36532-wqhd-dual-dsi-dsc.c
+  upstream: unknown
+  notes: TB710FU NT36532 dual-DSI DSC panel, renamed panel-novatek-nt36532; Chinese comments translated, the empty remove callback and the placeholder module author dropped.
+- `patches/0227-drm-msm-dsi-tb710fu-bonded-trigger-on-dsi0.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/patches/TB710FU-full-tree.diff
+  upstream: unknown
+  notes: The original swapped the legacy bonded command trigger to DSI_0 for every board; here only lenovo,tb710fu does.
+- `patches/0228-drm-msm-dsi-tb710fu-bootloader-controller-phy-state.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/patches/TB710FU-full-tree.diff
+  upstream: unknown
+  notes: Keeps the controller/PHY register state, vendor D-PHY timings, rescode and the no-sw_reset-on-underflow rule of the original, all gated on lenovo,tb710fu (the original applied them to every 7nm PHY and DSI host). The periodic heartbeat, register dumps and TLMM pad reads are left out; only the 10 s re-application of the controller state remains.
+- `patches/0229-drm-msm-dpu-tb710fu-dsc-width-round-up.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/patches/TB710FU-full-tree.diff
+  upstream: unknown
+- `patches/0230-drm-msm-a6xx-tb710fu-a750-without-ifpc.patch`
+  source: armada
+  upstream: local
+  notes: The original disabled IFPC for every A750; a machine-matched catalog entry keeps it for the other SM8650 boards.
+- `patches/0231-input-touchscreen-add-nt36532-spi-tb710fu.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/sources/drivers/input/touchscreen/NT36XXX_SPI
+  upstream: unknown
+  notes: Novatek vendor driver as carried by the TB710FU port, moved to nt36532/ (module nt36532_ts) with a clean Makefile; matches only `novatek,nt36532-ts-spi` so it cannot claim the `novatek,NVT-ts-spi` boards of novatek-nvt36xxx-spi. Source warnings of the vendor code are unchanged.
+- `patches/0232-Bluetooth-btqca-tb710fu-dt-bd-address.patch`
+  source: armada
+  upstream: local
+  notes: Next to 0223: on lenovo,tb710fu a non-zero DT local-bd-address replaces the serial-derived address.
+- `patches/0233-power-sequencing-qcom-wcn-tb710fu-reset-pulse.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/patches/TB710FU-full-tree.diff
+  upstream: unknown
+  notes: Gated on lenovo,tb710fu (unconditional in the original).
+- `patches/0234-bus-mhi-host-tb710fu-wcn7850-power-up.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/patches/TB710FU-full-tree.diff
+  upstream: unknown
+  notes: READY retry, stale-DISABLE drop and the polled power-up of the original, gated on lenovo,tb710fu; other MHI devices keep the interrupt-driven wait.
+- `patches/0235-wifi-ath12k-tb710fu-wcn7850-workarounds.patch`
+  source: https://github.com/MeteoricmeteorLL/tb710fu-linux/blob/16e800d4f6e5cf4a8517900a9e11eec0ebc91bd3/kernel/patches/TB710FU-full-tree.diff
+  upstream: unknown
+  notes: Only what is active on the running unit, gated on lenovo,tb710fu: CE polling while HTC/WMI wait, firmware log off, STA power save off, group-frame IV flags, hardware-crypto encrypt type. The periodic CE/DP poller, the A-MPDU refusal, the dedup and reorder switches and the debug counters of the original are left out. board_name is a plain module parameter.
+- `patches/0236-ASoC-qcom-common-add-DAI-node-TDM-slot-helpers.patch`
+  source: https://git.kernel.org/torvalds/c/1e844ecbc9cb
+  upstream: https://git.kernel.org/torvalds/c/1e844ecbc9cb
+- `patches/0237-ASoC-qcom-common-distinguish-missing-and-invalid-TDM-slots.patch`
+  source: https://git.kernel.org/torvalds/c/0a9e00d5ebdf
+  upstream: https://git.kernel.org/torvalds/c/0a9e00d5ebdf
+- `patches/0238-ASoC-qcom-q6apm-lpass-dais-add-TDM-DAI-operations.patch`
+  source: https://git.kernel.org/torvalds/c/4d0840175893
+  upstream: https://git.kernel.org/torvalds/c/4d0840175893
+  notes: Rewritten for this tree, which has no MI2S clock control; also records the TDM interface derived from the DAI id.
+- `patches/0239-ASoC-qcom-audioreach-configure-TDM-sink-endpoint.patch`
+  source: armada
+  upstream: local
+  notes: MODULE_ID_TDM_SINK with PARAM_ID_TDM_INTF_CFG, matching what the vendor AudioReach userspace sends on TB710FU; replaces the TB710FU port's full 7.3 sound/soc/qcom backport.
+- `patches/0240-ASoC-qcom-q6apm-tb710fu-four-speakers.patch`
+  source: armada
+  upstream: local
+  notes: On lenovo,tb710fu the stream MFC/data-logging modules run at 4ch/S32 and the MFC maps FL FR FL FR, so the stereo stream reaches all four TDM slots.
+- `patches/0241-ASoC-dt-bindings-qcom-sm8250-add-tb710fu-card.patch`
+  source: armada
+  upstream: local
+- `patches/0242-ASoC-qcom-sc8280xp-add-tb710fu-card.patch`
+  source: armada
+  upstream: local
+  notes: TDM BE fixup (4ch/S32) and DSP_B/IB_NF CPU format for `lenovo,tb710fu-sndcard` only.
