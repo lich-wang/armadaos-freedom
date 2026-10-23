@@ -638,9 +638,11 @@ int kshim_mmu_prepare_handoff(void)
 {
     if (!mMmu.configured)
         return 0;
+    /* Clean+invalidate read-only write-back regions too: the FDT can be
+     * mapped read-only for the menu and edited after the MMU is off, and the
+     * next kernel would otherwise see the stale clean lines (TB710FU). */
     for (size_t index = 0; index < mMmu.region_count; index++) {
-        if (mMmu.regions[index].type == KSHIM_MMU_NORMAL_WB &&
-            (mMmu.regions[index].permissions & KSHIM_MMU_WRITE))
+        if (mMmu.regions[index].type == KSHIM_MMU_NORMAL_WB)
             clean_range(mMmu.regions[index].base, mMmu.regions[index].size);
     }
 #if defined(__aarch64__)
