@@ -4,6 +4,9 @@
 set -euxo pipefail
 
 source ./BASE.env
+# TB710FU trial branch only: build the TB710FU overlay into the image kernel
+# so the PR image boots on that tablet (upstream keeps overlays opt-in).
+export KERNEL_OVERLAYS="${KERNEL_OVERLAYS-lenovo-tb710fu}"
 export KERNEL_VERSION="${VERSION}"
 export CCACHE_DIR="${CCACHE_DIR:-/ccache}"
 export CCACHE_MAXSIZE=4G
