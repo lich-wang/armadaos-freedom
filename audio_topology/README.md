@@ -2,13 +2,17 @@
 
 Source files for Armada's Qualcomm AudioReach topology blobs.
 
-Only the generated topology blobs under the following directory are copied into
-the firmware image; the `.m4` sources remain in this directory.
+Only the generated topology blobs under the following directories are copied
+into the firmware image; the `.m4` sources remain in this directory.
 
 ```text
 system_files/usr/lib/firmware/qcom/sm8750/
 system_files/usr/lib/firmware/qcom/sm8650/
 ```
+
+The TB710FU topology is derived from audioreach-topology (BSD-3-Clause,
+Linaro). Its notice is `sm8650/LICENSE`, and the same file is installed next
+to the blob as `qcom/sm8650/LICENSE.audioreach-topology`.
 
 To regenerate a topology using [audioreach-topology](https://git.codelinaro.org/linaro/qcomlt/audioreach-topology):
 
